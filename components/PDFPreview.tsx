@@ -1,7 +1,6 @@
 import React, { useState, useEffect } from 'react'
 // 移除 storageManager 依赖，统一走数据库操作
 import * as pdfjsLib from 'pdfjs-dist'
-import { X, Download, Printer } from 'lucide-react'
 import { clipOperations, TableNames, pdfOperations } from '../lib/database'
 import { formatFileSize, formatDate } from '../lib/utils'
 import type { ClipItem } from '../lib/types'

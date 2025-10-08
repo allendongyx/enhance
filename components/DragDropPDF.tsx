@@ -47,74 +47,100 @@ const DragDropPDF: React.FC<DragDropPDFProps> = ({
     onDragStart?.()
 
     try {
-      // 创建临时下载URL
+      // 获取PDF数据和文件名
+      let pdfId = clip.pdfId
+      if (!pdfId) {
+        const dbClip = await clipOperations.getById<any>(TableNames.CLIPS, clip.id)
+        pdfId = dbClip?.pdfId
+      }
+      
+      if (!pdfId) {
+        console.error('PDF ID not found')
+        return
+      }
+
+      // 获取PDF二进制数据和元数据
+      const [pdfBinaryData, pdfMeta] = await Promise.all([
+        pdfOperations.getPDFBinaryData(pdfId),
+        pdfOperations.getPDF(pdfId)
+      ])
+
+      if (!pdfBinaryData) {
+        console.error('PDF binary data not found')
+        return
+      }
+
+      // 确定文件名
+      let fileName = pdfMeta?.fileName || `${clip.title}.pdf`
+      
+      // 创建File对象用于文件上传表单
+      const pdfFile = new File([pdfBinaryData], fileName, { 
+        type: 'application/pdf',
+        lastModified: clip.timestamp 
+      })
+
+      // 设置拖拽效果
+      e.dataTransfer.effectAllowed = 'copy'
+      
+      // 添加File对象到DataTransfer - 这是关键，支持拖拽到input[type="file"]
+      e.dataTransfer.items.add(pdfFile)
+
+      // 创建临时下载URL用于其他拖拽目标（如桌面、文件夹等）
       const url = await createDownloadUrl()
       if (url) {
         setDownloadUrl(url)
         
-        // 设置拖拽数据
-        // 优先使用 pdf 元数据中的文件名，其次回退为标题.pdf
-        let fileName = `${clip.title}.pdf`
-        try {
-          let pdfId = clip.pdfId
-          if (!pdfId) {
-            const dbClip = await clipOperations.getById<any>(TableNames.CLIPS, clip.id)
-            pdfId = dbClip?.pdfId
-          }
-          if (pdfId) {
-            const meta = await pdfOperations.getPDF(pdfId)
-            if (meta?.fileName) fileName = meta.fileName
-          }
-        } catch {}
-        
-        // 设置下载URL和文件名
+        // 设置传统拖拽数据格式（保持向后兼容）
         e.dataTransfer.setData('DownloadURL', `application/pdf:${fileName}:${url}`)
         e.dataTransfer.setData('text/uri-list', url)
         e.dataTransfer.setData('text/plain', url)
-        
-        // 设置拖拽效果
-        e.dataTransfer.effectAllowed = 'copy'
-        
-        // 创建拖拽预览图像
-        const dragImage = document.createElement('div')
-        dragImage.style.cssText = `
-          position: absolute;
-          top: -1000px;
-          left: -1000px;
-          width: 200px;
-          height: 60px;
-          background: linear-gradient(135deg, #3b82f6, #8b5cf6);
-          border-radius: 12px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 12px 16px;
-          color: white;
-          font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          font-size: 14px;
-          font-weight: 500;
-          box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25);
-        `
-        
-        dragImage.innerHTML = `
-          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2Z"/>
-            <polyline points="14,2 14,8 20,8"/>
-          </svg>
-          <div>
-            <div style="font-weight: 600; margin-bottom: 2px;">${clip.title}</div>
-            <div style="opacity: 0.8; font-size: 12px;">${Math.round(clip.size / 1024)} KB</div>
-          </div>
-        `
-        
-        document.body.appendChild(dragImage)
-        e.dataTransfer.setDragImage(dragImage, 100, 30)
-        
-        // 清理拖拽图像
-        setTimeout(() => {
-          document.body.removeChild(dragImage)
-        }, 0)
       }
+      
+      // 确保dataTransfer.types包含'Files'类型，这样网页就能检测到文件拖拽
+      // 注意：通过items.add()添加File对象应该会自动添加'Files'类型到types数组
+      // 但为了确保兼容性，我们可以验证一下
+      console.log('DataTransfer types:', Array.from(e.dataTransfer.types))
+      console.log('DataTransfer items length:', e.dataTransfer.items.length)
+        
+      // 创建拖拽预览图像
+      const dragImage = document.createElement('div')
+      dragImage.style.cssText = `
+        position: absolute;
+        top: -1000px;
+        left: -1000px;
+        width: 200px;
+        height: 60px;
+        background: linear-gradient(135deg, #3b82f6, #8b5cf6);
+        border-radius: 12px;
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        padding: 12px 16px;
+        color: white;
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+        font-size: 14px;
+        font-weight: 500;
+        box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.25);
+      `
+      
+      dragImage.innerHTML = `
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <path d="M14,2H6A2,2 0 0,0 4,4V20A2,2 0 0,0 6,22H18A2,2 0 0,0 20,20V8L14,2Z"/>
+          <polyline points="14,2 14,8 20,8"/>
+        </svg>
+        <div>
+          <div style="font-weight: 600; margin-bottom: 2px;">${clip.title}</div>
+          <div style="opacity: 0.8; font-size: 12px;">${Math.round(clip.size / 1024)} KB</div>
+        </div>
+      `
+      
+      document.body.appendChild(dragImage)
+      e.dataTransfer.setDragImage(dragImage, 100, 30)
+      
+      // 清理拖拽图像
+      setTimeout(() => {
+        document.body.removeChild(dragImage)
+      }, 0)
     } catch (error) {
       console.error('Failed to setup drag data:', error)
     }

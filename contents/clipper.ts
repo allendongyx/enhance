@@ -2,7 +2,8 @@ import { Readability } from "@mozilla/readability"
 import jsPDF from "jspdf"
 import html2canvas from "html2canvas"
 // 注意：内容脚本不直接写入 IndexedDB（会写到页面域下），改为通过后台脚本持久化到扩展域
-import { icons } from "lucide"
+import JSZip from "jszip"
+import { Check, X } from "lucide-react"
 import "../style.css"
 
 // 消息类型定义
@@ -312,12 +313,12 @@ class ContentClipper {
       // 创建确认剪藏按钮（初始隐藏）
       const confirmBtn = document.createElement('button')
       confirmBtn.className = 'hidden inline-flex items-center px-4 py-2 bg-emerald-600 text-white rounded-md text-sm font-medium transition disabled:opacity-60 disabled:cursor-not-allowed hover:bg-emerald-700'
-      confirmBtn.innerHTML = `${icons['check'].toSvg({ width: 16, height: 16, class: 'mr-2' })}<span>确认剪藏</span>`
+      confirmBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2"><polyline points="20,6 9,17 4,12"></polyline></svg><span>确认剪藏</span>`
       
       // 创建取消按钮（初始状态下隐藏）
       const cancelBtn = document.createElement('button')
       cancelBtn.className = 'hidden inline-flex items-center px-4 py-2 bg-slate-600 text-white rounded-md text-sm font-medium transition hover:bg-slate-700'
-      cancelBtn.innerHTML = `${icons['x'].toSvg({ width: 16, height: 16, class: 'mr-2' })}<span>取消</span>`
+      cancelBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg><span>取消</span>`
       
       controls.appendChild(confirmBtn)
       controls.appendChild(cancelBtn)
@@ -464,7 +465,7 @@ class ContentClipper {
         controls.classList.add('hidden')
         confirmBtn.classList.add('hidden')
         confirmBtn.disabled = false
-        confirmBtn.innerHTML = `${icons['check'].toSvg({ width: 16, height: 16, class: 'mr-2' })}<span>确认剪藏</span>`
+        confirmBtn.innerHTML = `<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="mr-2"><polyline points="20,6 9,17 4,12"></polyline></svg><span>确认剪藏</span>`
         cancelBtn.classList.add('hidden')
         
         // 重新绑定鼠标移动事件
