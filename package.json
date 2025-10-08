@@ -1,18 +1,31 @@
 {
-  "name": "enhance",
-  "displayName": "Enhance",
-  "version": "0.0.1",
-  "description": "enhance",
-  "author": "Plasmo Corp. <foss@plasmo.com>",
+  "name": "gpt-enhance",
+  "displayName": "GPT-Enhance",
+  "version": "1.0.0",
+  "description": "一个智能的网页内容剪藏工具，支持将网页内容转换为PDF并进行管理",
+  "author": "KaKa Team",
   "scripts": {
     "dev": "plasmo dev",
+    "debug": "plasmo dev --verbose",
     "build": "plasmo build",
     "package": "plasmo package"
   },
   "dependencies": {
+    "@mozilla/readability": "^0.4.4",
+    "clsx": "^2.0.0",
+    "dayjs": "^1.11.18",
+    "dexie": "^4.2.0",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^2.5.1",
+    "jszip": "^3.10.1",
+    "lucide": "^0.544.0",
+    "lucide-react": "^0.263.1",
+    "pdfjs-dist": "^3.11.174",
     "plasmo": "0.90.5",
     "react": "18.2.0",
-    "react-dom": "18.2.0"
+    "react-dom": "18.2.0",
+    "react-pdf": "^10.1.0",
+    "tailwind-merge": "^2.0.0"
   },
   "devDependencies": {
     "@ianvs/prettier-plugin-sort-imports": "4.1.1",
@@ -20,12 +33,57 @@
     "@types/node": "20.11.5",
     "@types/react": "18.2.48",
     "@types/react-dom": "18.2.18",
+    "autoprefixer": "^10.4.16",
+    "postcss": "^8.4.32",
     "prettier": "3.2.4",
+    "tailwindcss": "^3.3.6",
     "typescript": "5.3.3"
   },
   "manifest": {
     "host_permissions": [
-      "https://*/*"
-    ]
+      "https://*/*",
+      "http://*/*"
+    ],
+    "permissions": [
+      "storage",
+      "unlimitedStorage",
+      "sidePanel",
+      "contextMenus",
+      "notifications",
+      "activeTab",
+      "scripting",
+      "tabs",
+      "downloads"
+    ],
+    "web_accessible_resources": [
+      {
+        "resources": [
+          "assets/pdfjs/pdf.min.js",
+          "assets/pdfjs/pdf.worker.min.js"
+        ],
+        "matches": [
+          "<all_urls>"
+        ]
+      }
+    ],
+    "commands": {
+      "clip-page": {
+        "suggested_key": {
+          "default": "Ctrl+Shift+C",
+          "mac": "Command+Shift+C"
+        },
+        "description": "剪藏当前页面"
+      },
+      "open-manager": {
+        "suggested_key": {
+          "default": "Ctrl+Shift+M",
+          "mac": "Command+Shift+M"
+        },
+        "description": "打开管理面板"
+      }
+    },
+    "side_panel": {
+      "default_path": "sidepanel.html"
+    }
   }
 }
