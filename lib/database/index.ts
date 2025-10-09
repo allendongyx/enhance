@@ -20,21 +20,10 @@ export type UserSettings = {
 import type { ClipItem } from '../types'
 export type { ClipItem } from '../types'
 
-export type PDFFile = {
-  id: string
-  title: string
-  fileName?: string
-  url: string
-  size: number
-  createdAt: number
-  updatedAt: number
-  tags?: string[]
-}
-
 export enum TableNames {
   SETTINGS = 'settings',
-  CLIPS = 'clips',
-  PDF_FILES = 'pdfs' // keep compatibility with existing store name
+  CLIPS = 'clips'
+  // 移除 PDF_FILES 表，PDF二进制数据现在使用OPFS存储
 }
 
 export const DEFAULT_USER_SETTINGS: Omit<UserSettings, 'id' | 'createdAt' | 'updatedAt'> = {
@@ -59,12 +48,12 @@ export const DEFAULT_USER_SETTINGS: Omit<UserSettings, 'id' | 'createdAt' | 'upd
   quickEntry: { enabled: true }
 }
 
-import Dexie, { Table } from 'dexie'
+import Dexie, { type Table } from 'dexie'
 
 class AppDB extends Dexie {
   settings!: Table<UserSettings, string>
   clips!: Table<ClipItem, string>
-  pdfs!: Table<PDFDoc, string>
+  // 移除 pdfs 表定义
 
   constructor() {
     super('gpt-enhance-db')
@@ -73,9 +62,10 @@ class AppDB extends Dexie {
       [TableNames.SETTINGS]: '&id,updatedAt',
       [TableNames.CLIPS]: '&id,url,createdAt,title,pdfId,tags',
     })
-    // v2: 增加 pdfs 表，统一到同一个 Dexie 数据库
+    // v2: 移除 pdfs 表，PDF数据现在使用OPFS存储
+    // 保持版本号以避免升级问题，但不再创建pdfs表
     this.version(2).stores({
-      [TableNames.PDF_FILES]: '&id,createdAt,updatedAt,title,url,size,tags'
+      // 空的升级，保持兼容性
     })
   }
 }
@@ -249,100 +239,8 @@ export const clipOperations = {
   }
 }
 
-// PDF 存储并入统一 Dexie 数据库
-export type PDFDoc = {
-  id: string
-  title: string
-  fileName?: string
-  url: string
-  content: ArrayBuffer
-  size: number
-  createdAt: number
-  updatedAt: number
-  tags?: string[]
-}
-
-export type PDFFile = {
-  id: string
-  title: string
-  fileName?: string
-  url: string
-  size: number
-  createdAt: number
-  updatedAt: number
-  tags?: string[]
-}
-
-export const pdfOperations = {
-  async storePDF(item: Omit<PDFDoc, 'createdAt' | 'updatedAt'>): Promise<string> {
-    const now = Date.now()
-    const record: PDFDoc = { ...item, createdAt: now, updatedAt: now }
-    await appDB.pdfs.put(record)
-    try {
-      const all = await appDB.pdfs.toArray()
-      console.groupCollapsed('[IndexedDB] pdfs 表 — 全量数据（store 后）', all.length)
-      console.table(all.map(({ content, ...meta }) => meta))
-      console.groupEnd()
-    } catch (e) {
-      console.warn('[IndexedDB] pdfs 表 全量数据打印失败（store 后）', e)
-    }
-    return item.id
-  },
-  async getPDF(id: string): Promise<PDFDoc | null> {
-    const item = await appDB.pdfs.get(id)
-    return item || null
-  },
-  async getPDFBinaryData(id: string): Promise<ArrayBuffer | null> {
-    const item = await appDB.pdfs.get(id)
-    return item ? item.content : null
-  },
-  async getAllPDFMetadata(): Promise<PDFFile[]> {
-    const list = await appDB.pdfs.toArray()
-    return list.map(({ content, ...meta }) => meta)
-  },
-  async delete(table: TableNames, id: string): Promise<void> {
-    await appDB.pdfs.delete(id)
-    try {
-      const all = await appDB.pdfs.toArray()
-      console.groupCollapsed('[IndexedDB] pdfs 表 — 全量数据（delete 后）', all.length)
-      console.table(all.map(({ content, ...meta }) => meta))
-      console.groupEnd()
-    } catch (e) {
-      console.warn('[IndexedDB] pdfs 表 全量数据打印失败（delete 后）', e)
-    }
-  },
-  async updateMetadata(id: string, updates: Partial<Pick<PDFDoc, 'title' | 'tags'>>): Promise<void> {
-    const existing = await appDB.pdfs.get(id)
-    if (!existing) return
-    const updated: PDFDoc = { ...existing, ...updates, updatedAt: Date.now() }
-    await appDB.pdfs.put(updated)
-    try {
-      const all = await appDB.pdfs.toArray()
-      console.groupCollapsed('[IndexedDB] pdfs 表 — 全量数据（update 后）', all.length)
-      console.table(all.map(({ content, ...meta }) => meta))
-      console.groupEnd()
-    } catch (e) {
-      console.warn('[IndexedDB] pdfs 表 全量数据打印失败（update 后）', e)
-    }
-  },
-  async createTempDownloadURL(id: string): Promise<string> {
-    const bin = await pdfOperations.getPDFBinaryData(id)
-    if (!bin) throw new Error('PDF not found')
-    const blob = new Blob([bin], { type: 'application/pdf' })
-    return URL.createObjectURL(blob)
-  },
-  async clearAllPDFs(): Promise<void> {
-    await appDB.pdfs.clear()
-    try {
-      const all = await appDB.pdfs.toArray()
-      console.groupCollapsed('[IndexedDB] pdfs 表 — 全量数据（clear 后）', all.length)
-      console.table(all.map(({ content, ...meta }) => meta))
-      console.groupEnd()
-    } catch (e) {
-      console.warn('[IndexedDB] pdfs 表 全量数据打印失败（clear 后）', e)
-    }
-  }
-}
+// PDF 存储相关代码已移除，现在使用OPFS存储
+// 所有PDF操作请使用 lib/pdfStorage.ts
 
 // Helpers for bridging with chrome.storage (for UI compatibility)
 export async function getCurrentUserSettings(): Promise<UserSettings> {

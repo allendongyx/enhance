@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from "react"
 import "./style.css"
-import { getCurrentUserSettings, settingsOperations, clipOperations, TableNames, DEFAULT_USER_SETTINGS, pdfOperations } from "./lib/database"
+import { getCurrentUserSettings, settingsOperations, clipOperations, TableNames, DEFAULT_USER_SETTINGS } from "./lib/database"
+import { pdfStorage } from "./lib/pdfStorage"
 import { formatFileSize } from "./lib/utils"
 
 // 设置项类型定义
@@ -113,12 +114,12 @@ function OptionsPage() {
 
   const loadStorageInfo = async (): Promise<void> => {
     try {
-      const [clips, pdfMetas] = await Promise.all([
+      const [clips, storageUsage] = await Promise.all([
         clipOperations.getAll(TableNames.CLIPS),
-        pdfOperations.getAllPDFMetadata()
+        pdfStorage.getStorageUsage()
       ])
       const clipSize = clips.reduce((sum, c) => sum + (c.size || 0), 0)
-      const pdfSize = pdfMetas.reduce((sum, p) => sum + (p.size || 0), 0)
+      const pdfSize = storageUsage.totalSize
       const used = clipSize + pdfSize
       const MAX_BYTES = 500 * 1024 * 1024 // 500MB 上限
       setStorageInfo({
@@ -201,7 +202,7 @@ function OptionsPage() {
     try {
       // 清空所有剪藏（包含PDF），并重置设置至默认（仅数据库）
       await clipOperations.clear(TableNames.CLIPS)
-      await pdfOperations.clearAllPDFs()
+      await pdfStorage.clearAll()
       await settingsOperations.saveUserSettings({
         autoClip: defaultSettings.autoClip,
         shortcuts: { clip: defaultSettings.clipShortcut, manager: defaultSettings.managerShortcut },

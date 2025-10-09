@@ -1,7 +1,8 @@
 import React, { useState, useEffect } from 'react'
-// 移除 storageManager 依赖，统一走数据库操作
+// 使用新的OPFS存储系统
 import * as pdfjsLib from 'pdfjs-dist'
-import { clipOperations, TableNames, pdfOperations } from '../lib/database'
+import { clipOperations, TableNames } from '../lib/database'
+import { pdfStorage } from '../lib/pdfStorage'
 import { formatFileSize, formatDate } from '../lib/utils'
 import type { ClipItem } from '../lib/types'
 
@@ -60,7 +61,7 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ clip, onClose }) => {
         return
       }
 
-      const pdfArrayBuffer = await pdfOperations.getPDFBinaryData(pdfId)
+      const pdfArrayBuffer = await pdfStorage.getPDFBinaryData(pdfId)
       if (pdfArrayBuffer) {
         const base64String = arrayBufferToBase64(pdfArrayBuffer)
         setPdfData(`data:application/pdf;base64,${base64String}`)
@@ -92,13 +93,13 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ clip, onClose }) => {
       const pdfId = dbClip.pdfId as string | undefined
 
       if (!pdfId) return
-      const pdf = await pdfOperations.getPDF(pdfId)
-      if (!pdf?.content) return
-      const blob = new Blob([pdf.content], { type: 'application/pdf' })
+      const pdfArrayBuffer = await pdfStorage.getPDFBinaryData(pdfId)
+      if (!pdfArrayBuffer) return
+      const blob = new Blob([pdfArrayBuffer], { type: 'application/pdf' })
       const url = URL.createObjectURL(blob)
       const a = document.createElement('a')
       a.href = url
-      a.download = pdf?.fileName || `${clip.title}.pdf`
+      a.download = `${clip.title}.pdf`
       document.body.appendChild(a)
       a.click()
       document.body.removeChild(a)
@@ -141,7 +142,7 @@ const PDFPreview: React.FC<PDFPreviewProps> = ({ clip, onClose }) => {
          let pdfDataUrl = null
          const dbClip = await clipOperations.getById<{ pdfId?: string }>(TableNames.CLIPS, clip.id)
          if (dbClip?.pdfId) {
-           const pdfArrayBuffer = await pdfOperations.getPDFBinaryData(dbClip.pdfId)
+           const pdfArrayBuffer = await pdfStorage.getPDFBinaryData(dbClip.pdfId)
            if (pdfArrayBuffer) {
              const base64String = arrayBufferToBase64(pdfArrayBuffer)
              pdfDataUrl = `data:application/pdf;base64,${base64String}`

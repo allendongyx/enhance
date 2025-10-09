@@ -1,6 +1,6 @@
 // 后台脚本 - 处理快捷键、右键菜单、通知等功能
 
-import { pdfStorage, type PDFStorageItem } from './lib/pdfStorage'
+import { pdfStorage } from './lib/pdfStorage'
 import { initializeDatabase, settingsOperations, saveUserSettingsToLocal, clipOperations, TableNames } from './lib/database'
 
 // 统一获取通知图标的扩展URL，避免相对路径导致找不到资源
@@ -495,22 +495,10 @@ async function downloadPDF(data: { pdfData: number[], fileName: string, title?: 
     const uint8Array = new Uint8Array(pdfData)
     const arrayBuffer = uint8Array.buffer
     
-    // 创建PDF存储项
-    const pdfItem: Omit<PDFStorageItem, 'createdAt' | 'updatedAt'> = {
-      id,
-      title: title || pdfFileName,
-      fileName: pdfFileName,
-      url: url || '',
-      content: arrayBuffer,
-      size: arrayBuffer.byteLength
-    }
+    // 使用OPFS存储PDF二进制数据
+    await pdfStorage.storePDF(id, arrayBuffer)
     
-    // 使用IndexedDB存储PDF
-    await pdfStorage.storePDF(pdfItem)
-    
-    // 返回唯一 pdfId（不再暴露 filePath）
-    
-    console.log(`PDF已保存到IndexedDB: ${pdfFileName}, 大小: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)}MB`)
+    console.log(`PDF已保存到OPFS: ${pdfFileName}, 大小: ${(arrayBuffer.byteLength / 1024 / 1024).toFixed(2)}MB`)
     
     return { success: true, pdfId: id, fileName: pdfFileName }
   } catch (error) {

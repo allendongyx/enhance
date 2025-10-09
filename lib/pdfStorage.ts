@@ -1,57 +1,114 @@
 /**
- * PDF存储管理模块（委托到统一 Dexie 数据库）
- * 依赖 lib/database/index.ts 的 pdfOperations，以保证插件只访问一个 DB。
+ * PDF存储管理模块（使用OPFS存储PDF二进制数据）
+ * 元数据仍使用IndexedDB存储，二进制数据使用OPFS存储
  */
 
-// 显式到目录的 index，避免某些打包器对目录解析异常
-import { pdfOperations, type PDFDoc, type PDFFile } from './database/index'
+import { clipOperations, TableNames } from './database/index'
+import { opfsStorage, isOPFSSupported, type OPFSStorageInfo } from './opfsStorage'
 
-export interface PDFStorageItem extends PDFDoc {}
-export interface PDFMetadata extends PDFFile {}
+export interface PDFMetadata {
+  id: string
+  title: string
+  fileName?: string
+  url: string
+  size: number
+  createdAt: number
+  updatedAt: number
+  tags?: string[]
+}
 
 class PDFStorageManager {
   async init(): Promise<void> {
+    // 初始化OPFS存储
+    if (isOPFSSupported()) {
+      await opfsStorage.init()
+    } else {
+      console.warn('[PDFStorage] OPFS不支持，将无法存储PDF文件')
+    }
   }
 
-  async storePDF(item: Omit<PDFStorageItem, 'createdAt' | 'updatedAt'>): Promise<string> {
-    return pdfOperations.storePDF(item)
+  /**
+   * 存储PDF文件（仅存储二进制数据到OPFS）
+   * @param pdfId PDF唯一标识符
+   * @param arrayBuffer PDF二进制数据
+   */
+  async storePDF(pdfId: string, arrayBuffer: ArrayBuffer): Promise<void> {
+    if (!isOPFSSupported()) {
+      throw new Error('OPFS不支持，无法存储PDF文件')
+    }
+    
+    await opfsStorage.storePDF(pdfId, arrayBuffer)
   }
 
-  async getPDF(id: string): Promise<PDFStorageItem | null> {
-    return pdfOperations.getPDF(id)
+  /**
+   * 获取PDF二进制数据
+   * @param pdfId PDF唯一标识符
+   */
+  async getPDFBinaryData(pdfId: string): Promise<ArrayBuffer | null> {
+    if (!isOPFSSupported()) {
+      console.warn('[PDFStorage] OPFS不支持，无法读取PDF文件')
+      return null
+    }
+    
+    return await opfsStorage.getPDF(pdfId)
   }
 
-  async getPDFMetadata(id: string): Promise<PDFMetadata | null> {
-    const item = await pdfOperations.getPDF(id)
-    if (!item) return null
-    const { content, ...meta } = item
-    return meta
+  /**
+   * 删除PDF文件
+   * @param pdfId PDF唯一标识符
+   */
+  async deletePDF(pdfId: string): Promise<void> {
+    if (isOPFSSupported()) {
+      await opfsStorage.deletePDF(pdfId)
+    }
   }
 
-  async getAllPDFMetadata(): Promise<PDFMetadata[]> {
-    return pdfOperations.getAllPDFMetadata()
+  /**
+   * 检查PDF文件是否存在
+   * @param pdfId PDF唯一标识符
+   */
+  async exists(pdfId: string): Promise<boolean> {
+    if (!isOPFSSupported()) {
+      return false
+    }
+    
+    return await opfsStorage.exists(pdfId)
   }
 
-  async deletePDF(id: string): Promise<void> {
-    return pdfOperations.delete('pdfs' as any, id)
-  }
-
-  async updatePDFMetadata(id: string, updates: Partial<Pick<PDFStorageItem, 'title' | 'tags'>>): Promise<void> {
-    return pdfOperations.updateMetadata(id, updates)
-  }
-
+  /**
+   * 获取存储使用情况
+   */
   async getStorageUsage(): Promise<{ totalSize: number; itemCount: number }> {
-    const list = await pdfOperations.getAllPDFMetadata()
-    const totalSize = list.reduce((sum, i) => sum + (i.size || 0), 0)
-    return { totalSize, itemCount: list.length }
+    if (!isOPFSSupported()) {
+      return { totalSize: 0, itemCount: 0 }
+    }
+    
+    const info = await opfsStorage.getStorageInfo()
+    return {
+      totalSize: info.totalSize,
+      itemCount: info.fileCount
+    }
   }
 
-  async createTempDownloadURL(id: string): Promise<string> {
-    return pdfOperations.createTempDownloadURL(id)
+  /**
+   * 创建临时下载URL
+   * @param pdfId PDF唯一标识符
+   */
+  async createTempDownloadURL(pdfId: string): Promise<string> {
+    if (!isOPFSSupported()) {
+      throw new Error('OPFS不支持，无法创建下载URL')
+    }
+    
+    return await opfsStorage.createTempDownloadURL(pdfId)
   }
 
+  /**
+   * 清空所有PDF文件
+   */
   async clearAll(): Promise<void> {
-    return pdfOperations.clearAllPDFs()
+    if (isOPFSSupported()) {
+      await opfsStorage.clearAll()
+    }
   }
 }
 

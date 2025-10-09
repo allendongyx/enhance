@@ -1,10 +1,10 @@
 import React, { useState, useEffect } from "react"
 import "./style.css"
 import PDFPreview from "./components/PDFPreview"
-import DragDropPDF from "./components/DragDropPDF"
-import { clipOperations, TableNames, pdfOperations } from "./lib/database"
+import { clipOperations, TableNames } from "./lib/database"
+import { pdfStorage } from "./lib/pdfStorage"
 import type { ClipItem } from './lib/types'
-import { Search, Download, Trash, Edit, FileText, RefreshCcw } from 'lucide-react'
+import { Search, Download, Trash, Edit, FileText, RefreshCw } from 'lucide-react'
 import { formatFileSize, formatDate } from './lib/utils'
 
 // 使用 lucide-react 图标库替换自定义 SVG 图标；大小与日期格式化改为复用 utils
@@ -13,11 +13,13 @@ function SidePanel() {
   const [clips, setClips] = useState<ClipItem[]>([])
   const [searchTerm, setSearchTerm] = useState('')
   const [sortBy, setSortBy] = useState<'date' | 'title'>('date')
-
-  const [previewClip, setPreviewClip] = useState<ClipItem | null>(null)
   const [isLoading, setIsLoading] = useState(true)
+  const [previewClip, setPreviewClip] = useState<ClipItem | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editTitle, setEditTitle] = useState('')
+  
+  // 为拖拽功能缓存PDF File对象
+  const [pdfFiles, setPdfFiles] = useState<Record<string, File>>({})
 
   // 加载剪藏列表
   useEffect(() => {
@@ -54,6 +56,13 @@ function SidePanel() {
     }
   }, [])
 
+  // 组件卸载时的清理（不再需要释放Blob URLs）
+  useEffect(() => {
+    return () => {
+      // 清理逻辑已移除，因为不再预缓存PDF URLs
+    }
+  }, [])
+
   const loadClips = async () => {
     try {
       console.log('[SidePanel] 开始加载剪藏列表（直接读取 Dexie）')
@@ -71,11 +80,52 @@ function SidePanel() {
       })) as ClipItem[]
       console.log('[SidePanel] Dexie 数据到达，数量=', mapped.length)
       setClips(mapped)
+      
+      // 预加载PDF文件用于拖拽（异步进行，不阻塞UI）
+      preloadPDFFiles(mapped)
+      
       setIsLoading(false)
     } catch (error) {
       console.error('加载剪藏列表失败:', error)
       setIsLoading(false)
     }
+  }
+
+  // 预加载PDF文件用于拖拽
+  const preloadPDFFiles = async (clips: ClipItem[]) => {
+    const files: Record<string, File> = {}
+    
+    for (const clip of clips) {
+      try {
+        let pdfId = clip.pdfId
+        if (!pdfId) {
+          const dbClip = await clipOperations.getById<any>(TableNames.CLIPS, clip.id)
+          pdfId = dbClip?.pdfId
+        }
+        
+        if (pdfId) {
+          const pdfArrayBuffer = await pdfStorage.getPDFBinaryData(pdfId)
+          if (pdfArrayBuffer) {
+            let fileName = clip.title
+            if (!fileName.toLowerCase().endsWith('.pdf')) {
+              fileName += '.pdf'
+            }
+            
+            const file = new File([pdfArrayBuffer], fileName, {
+              type: 'application/pdf',
+              lastModified: clip.timestamp
+            })
+            
+            files[clip.id] = file
+            console.log(`[预加载] PDF文件已缓存: ${fileName}`)
+          }
+        }
+      } catch (error) {
+        console.error(`预加载PDF失败 (${clip.id}):`, error)
+      }
+    }
+    
+    setPdfFiles(files)
   }
 
   // 过滤和排序剪藏
@@ -92,10 +142,9 @@ function SidePanel() {
       }
     })
 
-  // 下载PDF
-  const handleDownload = async (clip: ClipItem) => {
+  // 打开PDF在新标签页
+  const handleOpenPDF = async (clip: ClipItem) => {
     try {
-      // 统一使用 IndexedDB 读取与下载
       let pdfId = clip.pdfId
       if (!pdfId) {
         const dbClip = await clipOperations.getById<any>(TableNames.CLIPS, clip.id)
@@ -105,27 +154,66 @@ function SidePanel() {
         alert('未找到该剪藏对应的PDF数据')
         return
       }
-      const pdf = await pdfOperations.getPDF(pdfId)
-      if (pdf?.content) {
-        const blob = new Blob([pdf.content], { type: 'application/pdf' })
+      
+      // 从OPFS读取PDF数据
+      const pdfArrayBuffer = await pdfStorage.getPDFBinaryData(pdfId)
+      if (pdfArrayBuffer) {
+        const blob = new Blob([pdfArrayBuffer], { type: 'application/pdf' })
+        const url = URL.createObjectURL(blob)
+        
+        // 在新标签页中打开PDF
+        const newTab = window.open(url, '_blank')
+        if (newTab) {
+          // 设置标签页标题
+          newTab.document.title = clip.title
+        }
+        
+        // 清理URL对象（延迟清理，确保标签页已加载）
+        setTimeout(() => {
+          URL.revokeObjectURL(url)
+        }, 5000)
+      } else {
+        alert('PDF数据不存在或已被删除')
+      }
+    } catch (error) {
+      console.error('打开PDF失败:', error)
+      alert('打开PDF失败，请重试')
+    }
+  }
+
+  // 下载PDF
+  const handleDownload = async (clip: ClipItem) => {
+    try {
+      let pdfId = clip.pdfId
+      if (!pdfId) {
+        const dbClip = await clipOperations.getById<any>(TableNames.CLIPS, clip.id)
+        pdfId = dbClip?.pdfId
+      }
+      if (!pdfId) {
+        alert('未找到该剪藏对应的PDF数据')
+        return
+      }
+      
+      // 从OPFS读取PDF数据
+      const pdfArrayBuffer = await pdfStorage.getPDFBinaryData(pdfId)
+      if (pdfArrayBuffer) {
+        const blob = new Blob([pdfArrayBuffer], { type: 'application/pdf' })
         const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
         a.href = url
-        a.download = pdf.fileName || `${clip.title}.pdf`
+        a.download = `${clip.title}.pdf`
         document.body.appendChild(a)
         a.click()
         document.body.removeChild(a)
         URL.revokeObjectURL(url)
-        return
       } else {
         alert('PDF数据不存在或已被删除')
       }
     } catch (error) {
       console.error('下载失败:', error)
+      alert('下载失败，请重试')
     }
   }
-
-  // 删除剪藏
   const handleDelete = async (clip: ClipItem) => {
     if (confirm(`确定要删除"${clip.title}"吗？`)) {
       try {
@@ -182,7 +270,7 @@ function SidePanel() {
       try {
         // 清空 clips 表并清理所有 PDF 数据
         await clipOperations.clear(TableNames.CLIPS)
-        await pdfOperations.clearAllPDFs()
+        await pdfStorage.clearAll()
         
         setClips([])
         setPreviewClip(null)
@@ -224,7 +312,7 @@ function SidePanel() {
               disabled={isLoading}
             >
               <span className={isLoading ? 'animate-spin' : ''}>
-                <RefreshCcw size={18} />
+                <RefreshCw size={18} />
               </span>
             </button>
           </div>
@@ -282,82 +370,161 @@ function SidePanel() {
             </div>
           ) : (
             <div className="py-4 space-y-2">
-              {filteredAndSortedClips.map((clip) => (
-                <DragDropPDF
-                  key={clip.id}
-                  clip={clip}
-                  className={`group p-4 rounded-xl cursor-pointer transition-all duration-200 border ${
-                    previewClip?.id === clip.id
-                      ? 'bg-blue-50 border-blue-200 shadow-sm'
-                      : 'bg-white border-gray-100 hover:bg-gray-50 hover:border-gray-200 hover:shadow-sm'
-                  } hover:cursor-grab active:cursor-grabbing`}
-                  onClick={() => {
-                    setPreviewClip(clip)
-                  }}
-                  title="点击预览，拖拽上传到其他应用"
-                >
-                  <div className="flex justify-between items-start mb-3">
-                    {editingId === clip.id ? (
-                      <input
-                        type="text"
-                        value={editTitle}
-                        onChange={(e) => setEditTitle(e.target.value)}
-                        onBlur={() => handleRename(clip, editTitle)}
-                        onKeyPress={(e) => {
-                          if (e.key === 'Enter') {
-                            handleRename(clip, editTitle)
-                          }
-                        }}
-                        className="flex-1 text-base font-medium text-gray-900 bg-white border border-gray-200 rounded-lg px-3 py-2 mr-3 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 focus:outline-none"
-                        autoFocus
-                      />
-                    ) : (
-                      <h3 className="flex-1 text-base font-medium text-gray-900 leading-6 line-clamp-2">
-                        {clip.title}
-                      </h3>
-                    )}
-                    
-                    <div className="flex items-center space-x-1 ml-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          startEdit(clip)
-                        }}
-                        className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-all duration-200"
-                        title="重命名"
-                      >
-            <Edit size={16} />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDownload(clip)
-                        }}
-                        className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all duration-200"
-                        title="下载"
-                      >
-            <Download size={16} />
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          handleDelete(clip)
-                        }}
-                        className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all duration-200"
-                        title="删除"
-                      >
-            <Trash size={16} />
-                      </button>
-                    </div>
-                  </div>
-                  
-                  <p className="text-sm text-gray-500 mb-3 truncate font-mono">{clip.url}</p>
-                  <div className="flex justify-between items-center">
-                    <span className="text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded-md">{formatDate(clip.timestamp)}</span>
-                    <span className="text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded-md">{formatFileSize(clip.size)}</span>
-                  </div>
-                </DragDropPDF>
-              ))}
+              {filteredAndSortedClips.map((clip) => {
+                 return (
+                   <div
+                     key={clip.id}
+                     draggable="true"
+                     className={`group p-4 rounded-xl cursor-pointer transition-all duration-200 border ${
+                       previewClip?.id === clip.id
+                         ? 'bg-blue-50 border-blue-200 shadow-sm'
+                         : 'bg-white border-gray-100 hover:bg-gray-50 hover:border-gray-200 hover:shadow-sm'
+                     } hover:cursor-grab active:cursor-grabbing`}
+                     onClick={() => handleOpenPDF(clip)}
+                     onDragStart={(e) => {
+                       // 使用预缓存的File对象进行拖拽
+                       const cachedFile = pdfFiles[clip.id]
+                       if (!cachedFile) {
+                         console.warn('[dragstart] 未找到缓存的PDF文件，请等待预加载完成')
+                         e.preventDefault()
+                         return
+                       }
+
+                       // 设置拖拽效果
+                       e.dataTransfer.effectAllowed = 'copy'
+                       
+                       // 创建临时下载链接
+                       const blob = new Blob([cachedFile], { type: 'application/pdf' })
+                       const downloadUrl = URL.createObjectURL(blob)
+                       
+                       // 创建临时的a标签用于下载
+                       const tempLink = document.createElement('a')
+                       tempLink.href = downloadUrl
+                       tempLink.download = cachedFile.name
+                       tempLink.style.display = 'none'
+                       document.body.appendChild(tempLink)
+                       
+                       // 设置拖拽数据 - 使用多种格式确保兼容性
+                       try {
+                         // 添加File对象
+                         if (e.dataTransfer.items) {
+                           e.dataTransfer.items.add(cachedFile)
+                         }
+                         
+                         // 设置各种数据类型
+                         e.dataTransfer.setData('text/uri-list', downloadUrl)
+                         e.dataTransfer.setData('text/plain', cachedFile.name)
+                         e.dataTransfer.setData('application/pdf', downloadUrl)
+                         
+                         // Chrome特有的DownloadURL格式
+                         const downloadURLData = `application/pdf:${cachedFile.name}:${downloadUrl}`
+                         e.dataTransfer.setData('DownloadURL', downloadURLData)
+                         
+                         // 设置HTML格式（某些应用支持）
+                         const htmlData = `<a href="${downloadUrl}" download="${cachedFile.name}">${cachedFile.name}</a>`
+                         e.dataTransfer.setData('text/html', htmlData)
+                         
+                       } catch (err) {
+                         console.warn('设置拖拽数据时出错:', err)
+                       }
+                       
+                       // 清理函数
+                       const cleanup = () => {
+                         URL.revokeObjectURL(downloadUrl)
+                         if (tempLink.parentNode) {
+                           document.body.removeChild(tempLink)
+                         }
+                       }
+                       
+                       // 延迟清理，给足够时间完成拖拽操作
+                       setTimeout(cleanup, 60000) // 1分钟后清理
+                       
+                       console.log('[dragstart] 拖拽数据设置完成', {
+                         clipId: clip.id,
+                         fileName: cachedFile.name,
+                         fileSize: cachedFile.size,
+                         fileType: cachedFile.type,
+                         downloadUrl: downloadUrl,
+                         hasItems: !!e.dataTransfer.items,
+                         itemsLength: e.dataTransfer.items?.length || 0,
+                         filesLength: e.dataTransfer.files?.length || 0,
+                         types: Array.from(e.dataTransfer.types || [])
+                       })
+                     }}
+                     onDragEnd={(e) => {
+                       console.log('[dragend] 拖拽结束', {
+                         dropEffect: e.dataTransfer.dropEffect,
+                         effectAllowed: e.dataTransfer.effectAllowed
+                       })
+                     }}
+                     title="点击在新标签页打开PDF，拖拽上传到其他应用"
+                     >
+                       <div className="flex justify-between items-start mb-3">
+                         {editingId === clip.id ? (
+                           <input
+                             type="text"
+                             value={editTitle}
+                             onChange={(e) => setEditTitle(e.target.value)}
+                             onBlur={() => handleRename(clip, editTitle)}
+                             onKeyPress={(e) => {
+                               if (e.key === 'Enter') {
+                                 handleRename(clip, editTitle)
+                               }
+                             }}
+                             className="flex-1 text-base font-medium text-gray-900 bg-white border border-gray-200 rounded-lg px-3 py-2 mr-3 focus:ring-2 focus:ring-blue-100 focus:border-blue-300 focus:outline-none"
+                             autoFocus
+                           />
+                         ) : (
+                           <h3 className="flex-1 text-base font-medium text-gray-900 leading-6 line-clamp-2">
+                             {clip.title}
+                           </h3>
+                         )}
+                         
+                         <div className="flex items-center space-x-1 ml-3 opacity-0 group-hover:opacity-100 transition-opacity duration-200">
+                           <button
+                             onClick={(e) => {
+                               e.preventDefault()
+                               e.stopPropagation()
+                               startEdit(clip)
+                             }}
+                             className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-all duration-200"
+                             title="重命名"
+                           >
+                 <Edit size={16} />
+                           </button>
+                           <button
+                             onClick={(e) => {
+                               e.preventDefault()
+                               e.stopPropagation()
+                               handleDownload(clip)
+                             }}
+                             className="p-2 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded-lg transition-all duration-200"
+                             title="下载"
+                           >
+                 <Download size={16} />
+                           </button>
+                           <button
+                             onClick={(e) => {
+                               e.preventDefault()
+                               e.stopPropagation()
+                               handleDelete(clip)
+                             }}
+                             className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-lg transition-all duration-200"
+                             title="删除"
+                           >
+                 <Trash size={16} />
+                           </button>
+                         </div>
+                       </div>
+                       
+                       <p className="text-sm text-gray-500 mb-3 truncate font-mono">{clip.url}</p>
+                       <div className="flex justify-between items-center">
+                         <span className="text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded-md">{formatDate(clip.timestamp)}</span>
+                         <span className="text-xs text-gray-400 bg-gray-50 px-2 py-1 rounded-md">{formatFileSize(clip.size)}</span>
+                       </div>
+                     </div>
+                   )
+               })}
             </div>
           )}
         </div>
@@ -375,3 +542,13 @@ function SidePanel() {
 }
 
 export default SidePanel
+// 简单的 ArrayBuffer -> base64 转换（用于构造 data:application/pdf;base64,...）
+function arrayBufferToBase64(buffer: ArrayBuffer): string {
+  let binary = ''
+  const bytes = new Uint8Array(buffer)
+  const len = bytes.byteLength
+  for (let i = 0; i < len; i++) {
+    binary += String.fromCharCode(bytes[i])
+  }
+  return btoa(binary)
+}
